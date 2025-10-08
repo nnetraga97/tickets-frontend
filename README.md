@@ -30,25 +30,6 @@ Developers will find this project modular, typed, cache-friendly, and production
 
 ⸻
 
-🏗️ Architecture Diagram
-
- ┌────────────────────────────────────────────────────────────┐
- │                        Frontend (Vite)                     │
- │                                                            │
- │  React (TSX)  ──┐                                           │
- │  TanStack Query │───► API Client (fetch) ──►  Spring Boot   │
- │  TanStack Table │                                            │
- │  Context / Hooks│                                            │
- │  Tailwind UI    │                                            │
- │  Tracing Header │──► Zipkin Trace Propagation                │
- │  ETag Cache     │◄── 304 Not Modified Responses              │
- │  S3 Attachments │──► CDN or LocalStack                       │
- │  SW Caching     │──► Offline Static Assets                   │
- └────────────────────────────────────────────────────────────┘
-
-
-⸻
-
 🗂️ Directory Structure
 
 src/
@@ -292,15 +273,3 @@ Tracing	Zipkin (traceparent)	Distributed tracing
 Caching	ETag + Redis (BE)	Efficient sync
 Storage	S3 / LocalStack	Attachments
 Monitoring	fw_logs / fw_errors	Frontend → backend logs
-
-
-⸻
-
-🧭 License
-
-This project is proprietary to the New Mexico Health Care Authority Ticket Management system.
-For internal development and demonstration use only.
-
-⸻
-
-Would you like me to include example screenshots or architecture diagrams (PNG) next? I can generate a professional diagram showing frontend layers, backend integration, and tracing flow.
