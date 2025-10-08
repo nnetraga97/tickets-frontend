@@ -1,0 +1,24 @@
+@import "tailwindcss";
+:root {
+  --radius: 14px;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+.glass {
+  background: var(--glass, rgba(255, 255, 255, 0.5));
+  -webkit-backdrop-filter: saturate(150%) blur(16px);
+  backdrop-filter: saturate(150%) blur(16px);
+}
+
+.card{
+  border-radius: var(--radius);
+  box-shadow: 0 10px 40px -12px rgba(0, 0, 0, 0.12);
+}
+
+
+a {
+  text-underline-offset: 3px;
+}
