@@ -55,14 +55,22 @@ function rid() {
 export function AlertProvider({ children }: { children: React.ReactNode }) {
     const [items, setItems] = useState<AlertItem[]>([]);
     const timers = useRef<Map<string, any>>(new Map());
-    const { logEvent } = useLogger();
+    const { logEvent, logInfo, logDebug } = useLogger();
 
     const [inbox, setInbox] = useState<InboxItem[]>(() => {
         try {
             const raw = sessionStorage.getItem(SS_INBOX);
-            return raw ? (JSON.parse(raw) as InboxItem[]) : [];
+            const parsed = raw ? (JSON.parse(raw) as InboxItem[]) : [];
+            logDebug('AlertProvider_inbox_restored', { 
+                inboxCount: parsed.length,
+                unreadCount: parsed.filter(x => !x.read).length
+            }, 'store/alert.tsx');
+            return parsed;
         }
-        catch {
+        catch (err) {
+            logInfo('AlertProvider_inbox_restore_failed', { 
+                error: String(err)
+            }, 'store/alert.tsx');
             return [];
         }
     });
@@ -78,18 +86,30 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     }
 
     const remove = useCallback((id: string) => {
+        logDebug("alert_remove", { id }, 'store/alert.tsx');
         logEvent("alert_remove", { action: "alert", id: id })
+        
         setItems((list) => list.filter((x) => x.id !== id));
         const t = timers.current.get(id);
         if (t) {
             clearTimeout(t);
             timers.current.delete(id);
         }
-    }, []);
+    }, [logDebug, logEvent]);
 
     const push: AlertCtx["push"] = useCallback((a) => {
         const id = a.id || rid();
         const item: AlertItem = { id, kind: "info", ...a };
+        
+        logInfo("alert_pushed", { 
+            id,
+            kind: item.kind,
+            hasTitle: !!item.title,
+            hasRouteTo: !!item.routeTo,
+            toInbox: a.toInbox !== false,
+            messageLength: item.message.length
+        }, 'store/alert.tsx');
+        
         logEvent("alert_added", { action: "alert", id: a.id })
         setItems((list) => [...list, item]);
 
@@ -109,17 +129,26 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
             persistInbox([entry, ...inbox].slice(0, 20));
         }
         return id;
-    }, [inbox, remove]);
+    }, [inbox, remove, logInfo, logEvent]);
 
     const markRead: AlertCtx["markRead"] = (id) => {
+        logDebug("alert_mark_read", { id }, 'store/alert.tsx');
         persistInbox(inbox.map((x) => (x.id === id ? { ...x, read: true } : x)));
     }
 
     const markAllRead: AlertCtx["markAllRead"] = () => {
+        const unreadCount = inbox.filter(x => !x.read).length;
+        logInfo("alert_mark_all_read", { 
+            totalCount: inbox.length,
+            markedCount: unreadCount
+        }, 'store/alert.tsx');
         persistInbox(inbox.map((x) => ({ ...x, read: true })));
     }
 
     const clearInbox: AlertCtx["clearInbox"] = () => {
+        logInfo("alert_clear_inbox", { 
+            clearedCount: inbox.length
+        }, 'store/alert.tsx');
         persistInbox([]);
     }
 

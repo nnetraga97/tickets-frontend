@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useAlertsLive } from "../store/alertsLive";
 import { useAlert } from "../store/alert";
+import { useAuth } from "../store/auth";
 import { useNavigate } from "react-router-dom";
 
 export default function Notifications() {
     const { alerts, unreadCount, markRead, markAllRead, isServerEnabled } = useAlertsLive();
     const { inbox } = useAlert();
+    const { user } = useAuth();
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement | null>(null);
     const nav = useNavigate();
@@ -18,12 +20,19 @@ export default function Notifications() {
         return () => document.removeEventListener("mousedown", onDoc);
     }, []);
 
-    const data = isServerEnabled ? alerts : inbox.map((x) => ({ id: x.id, ts: x.ts, title: x.title, message: x.message, kind: x.kind, routeTo: x.routeTo, read: x.read }))
-        .sort((a, b) => b.ts - a.ts);
+    // Use server alerts if enabled, otherwise use local inbox
+    const data = isServerEnabled ? alerts : inbox.map((x) => ({ 
+        id: x.id, 
+        ts: x.ts, 
+        title: x.title, 
+        message: x.message, 
+        kind: x.kind, 
+        routeTo: x.routeTo, 
+        read: x.read 
+    })).sort((a, b) => b.ts - a.ts);
 
-
-    const unread = data.filter((x) => !x.read);
-    const read = data.filter((x) => x.read);
+    const unread = data.filter((x) => !x.read && !x.read_flag);
+    const read = data.filter((x) => x.read || x.read_flag);
 
     const onClickItem = (id: string, routeTo?: string) => {
         if (isServerEnabled)
@@ -50,17 +59,24 @@ export default function Notifications() {
 
             {open && (
                 <div className="absolute right-0 mt-2 w-[380px] overflow-hidden rounded-2xl border border-black/10 bg-white p-2 shaodow-soft-lg dark:border-white/10 dark:bg-neutral-900">
-                    <div className="mb-1 flex items-center justify-between px-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                            Notifications
+                    <div className="mb-2 px-1">
+                        <div className="flex items-center justify-between mb-1">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                Notifications
+                            </div>
+                            {unreadCount > 0 && (
+                                <button
+                                    onClick={() => markAllRead()}
+                                    className="rounded-md px-2 py-0.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700/50"
+                                >
+                                    Mark All Read
+                                </button>
+                            )}
                         </div>
-                        {unreadCount > 0 && (
-                            <button
-                                onClick={() => markAllRead()}
-                                className="rounded-md px-2 py-0.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700/50"
-                            >
-                                Mark All Read
-                            </button>
+                        {isServerEnabled && user && (
+                            <div className="text-[10px] text-neutral-400 dark:text-neutral-600">
+                                {user.fullName || user.username} ({user.role})
+                            </div>
                         )}
                     </div>
 

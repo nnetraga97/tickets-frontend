@@ -19,10 +19,18 @@ export default function TicketDetail() {
     const qc = useQueryClient();
     const { push } = useAlert();
     const [menuOpen, setMenuOpen] = useState(false);
-    const { logEvent } = useLogger();
+    const { logEvent, logInfo, logDebug, logError, logWarn, startTimer } = useLogger();
     const { addVisitedIncident } = useSession();
     const nav = useNavigate();
     const DBEAVER_URL = import.meta.env.VITE_DBEAVER_URL || "/dbeaver";
+
+    // Log component mount
+    useEffect(() => {
+        logInfo('TicketDetail_mounted', { ticketId: id }, 'pages/TicketDetail.tsx');
+        return () => {
+            logInfo('TicketDetail_unmounted', { ticketId: id }, 'pages/TicketDetail.tsx');
+        };
+    }, [id, logInfo]);
 
     const [ctxList, setCtxList] = useState<string[]>([]);
     const [ctxSelected, setCtxSelectedState] = useState<string | undefined>(undefined);
@@ -36,6 +44,23 @@ export default function TicketDetail() {
         enabled: !!id,
         initialData: seed,
     });
+
+    // Log data state changes
+    useEffect(() => {
+        if (isLoading) {
+            logDebug('TicketDetail_loading', { ticketId: id }, 'pages/TicketDetail.tsx');
+        } else if (error) {
+            logError('TicketDetail_load_error', error, { ticketId: id });
+        } else if (data) {
+            logInfo('TicketDetail_data_loaded', { 
+                ticketId: id,
+                status: data.status,
+                category: data.category,
+                hasAttachments: !!data.attachments?.length,
+                attachmentCount: data.attachments?.length || 0
+            }, 'pages/TicketDetail.tsx');
+        }
+    }, [isLoading, error, data, id, logDebug, logError, logInfo]);
 
     const idx = useMemo(() => all.findIndex((t) => t.incident_id === id), [all, id]);
     const total = all.length;
@@ -79,6 +104,12 @@ export default function TicketDetail() {
         const v = ctxInput.trim();
         if (!v)
             return;
+        
+        logInfo('TicketDetail_context_added', { 
+            ticketId: id,
+            contextValue: v
+        }, 'pages/TicketDetail.tsx');
+        
         addCtxItem(id, v);
         setCtxInput("");
     }
@@ -86,17 +117,34 @@ export default function TicketDetail() {
     const onRemoveCtx = (v: string) => {
         if (!id)
             return;
+        
+        logInfo('TicketDetail_context_removed', { 
+            ticketId: id,
+            contextValue: v
+        }, 'pages/TicketDetail.tsx');
+        
         removeCtxItem(id, v);
     }
 
     const onSelectCtx = (v?: string) => {
         if (!id)
             return;
+        
+        logDebug('TicketDetail_context_selected', { 
+            ticketId: id,
+            contextValue: v
+        }, 'pages/TicketDetail.tsx');
+        
         setCtxSelectedState(v || undefined);
         setCtxSelected(id, v || undefined);
     }
 
     const openDBeaver = () => {
+        logInfo('TicketDetail_dbeaver_opened', { 
+            ticketId: id,
+            url: DBEAVER_URL
+        }, 'pages/TicketDetail.tsx');
+        
         window.open(DBEAVER_URL, "_blank", "noopener,noreferrer");
     };
 
@@ -135,6 +183,12 @@ export default function TicketDetail() {
     }, [id]);
 
     const updateInternal = (val: internalStatus | "") => {
+        logInfo('TicketDetail_internal_status_changed', { 
+            ticketId: id,
+            newStatus: val,
+            previousStatus: internal
+        }, 'pages/TicketDetail.tsx');
+        
         setInternal(val);
         if (id)
             setInternalStatus(id, val || undefined);
@@ -147,27 +201,73 @@ export default function TicketDetail() {
     const t = data as Ticket;
 
     async function onScrape() {
+        const timer = startTimer('scrape_ticket');
+        logInfo('TicketDetail_scrape_started', { ticketId: t.incident_id }, 'pages/TicketDetail.tsx');
+        
         try {
             logEvent("scrape_click", { action: "scrape", id: t.incident_id })
             const res = await scrapeTicket(t.incident_id);
-            console.log("creating alert")
-            push({ kind: "success", title: "Scrape", message: `Ticket ${t.incident_id}:${res.status}`, routeTo: `/tickets/${t.incident_id}` });
+            const duration = timer.end();
+            
+            logInfo('TicketDetail_scrape_queued', { 
+                ticketId: t.incident_id,
+                jobId: res.job_id,
+                duration_ms: duration
+            }, 'pages/TicketDetail.tsx');
+            
+            // Job is queued - user will get alert updates via SSE
+            push({ 
+                kind: "info", 
+                title: "Job Queued", 
+                message: res.message,
+                toInbox: false 
+            });
         }
         catch (e) {
-            push({ kind: "error", title: "Scrape failed", message: String((e as Error).message || e) });
-
+            const duration = timer.end();
+            logError('TicketDetail_scrape_failed', e, { 
+                ticketId: t.incident_id,
+                duration_ms: duration
+            });
+            push({ kind: "error", title: "Failed to queue job", message: String((e as Error).message || e) });
         }
     }
 
     async function onElig(target: "edg" | "edbc") {
+        const timer = startTimer(`elig_${target}`);
+        logInfo('TicketDetail_elig_started', { 
+            ticketId: t.incident_id,
+            target
+        }, 'pages/TicketDetail.tsx');
+        
         try {
             logEvent("elig_click", { action: `elig_${target}`, id: t.incident_id })
             const res = await runElig(t.incident_id, target);
-            push({ kind: "success", title: "Eligibility Run", message: `${target.toUpperCase()} for Ticket ${t.incident_id}:${res.status}` });
+            const duration = timer.end();
+            
+            logInfo('TicketDetail_elig_queued', { 
+                ticketId: t.incident_id,
+                target,
+                jobId: res.job_id,
+                duration_ms: duration
+            }, 'pages/TicketDetail.tsx');
+            
+            // Job is queued - user will get alert updates via SSE
+            push({ 
+                kind: "info", 
+                title: "Job Queued", 
+                message: res.message,
+                toInbox: false 
+            });
         }
         catch (e) {
-            push({ kind: "error", title: "Eligibility run failed", message: String((e as Error).message || e) });
-
+            const duration = timer.end();
+            logError('TicketDetail_elig_failed', e, { 
+                ticketId: t.incident_id,
+                target,
+                duration_ms: duration
+            });
+            push({ kind: "error", title: "Failed to queue job", message: String((e as Error).message || e) });
         }
     }
     return (
@@ -192,7 +292,7 @@ export default function TicketDetail() {
                         disabled={!prevId}
                         className="rounded-lg px-3 py-1.5 disabled:opacity-40 hover:bg-neutral-100 dark:hover:bg-neutral-800">
                         <svg width="50%" height="10%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M20.6621 17C18.933 19.989 15.7013 22 11.9999 22C6.47703 22 1.99988 17.5228 1.99988 12C1.99988 6.47715 6.47703 2 11.9999 2C15.7013 2 18.933 4.01099 20.6621 7M11.9999 8L7.99995 12M7.99995 12L11.9999 16M7.99995 12H21.9999" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M20.6621 17C18.933 19.989 15.7013 22 11.9999 22C6.47703 22 1.99988 17.5228 1.99988 12C1.99988 6.47715 6.47703 2 11.9999 2C15.7013 2 18.933 4.01099 20.6621 7M11.9999 8L7.99995 12M7.99995 12L11.9999 16M7.99995 12H21.9999" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>Prev
                     </button>
                     <button
@@ -200,7 +300,7 @@ export default function TicketDetail() {
                         disabled={!nextId}
                         className="rounded-lg px-3 py-1.5 disabled:opacity-40 hover:bg-neutral-100 dark:hover:bg-neutral-800">
                         Next<svg width="50%" height="15%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3.33789 7C5.06694 4.01099 8.29866 2 12.0001 2C17.5229 2 22.0001 6.47715 22.0001 12C22.0001 17.5228 17.5229 22 12.0001 22C8.29866 22 5.06694 19.989 3.33789 17M12 16L16 12M16 12L12 8M16 12H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            <path d="M3.33789 7C5.06694 4.01099 8.29866 2 12.0001 2C17.5229 2 22.0001 6.47715 22.0001 12C22.0001 17.5228 17.5229 22 12.0001 22C8.29866 22 5.06694 19.989 3.33789 17M12 16L16 12M16 12L12 8M16 12H2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                     </button>
                 </div>

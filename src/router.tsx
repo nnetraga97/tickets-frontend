@@ -13,19 +13,38 @@ import Perf from "./pages/Perf";
 function RequireAuth({ children }: { children: JSX.Element }) {
     const { isAuthenticated } = useAuth();
     const location = useLocation();
+    const { logWarn, logInfo } = useLogger();
+    
     if (!isAuthenticated) {
+        logWarn('RequireAuth_redirect_to_login', { 
+            attemptedPath: location.pathname,
+            search: location.search,
+            state: location.state
+        }, 'router.tsx');
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
+    
     return children;
 }
 
 export default function AppRouter() {
-    const { logEvent } = useLogger();
+    const { logEvent, logInfo, logDebug } = useLogger();
     const location = useLocation();
 
     useEffect(() => {
+        const isInitialLoad = !document.referrer || document.referrer === window.location.href;
+        
+        logInfo('router_page_view', { 
+            path: location.pathname,
+            search: location.search,
+            hash: location.hash,
+            state: location.state,
+            isInitialLoad,
+            timestamp: Date.now()
+        }, 'router.tsx');
+        
         logEvent('page_view', { path: location.pathname });
-    }, [location.pathname, logEvent]);
+    }, [location.pathname, location.search, location.hash, logEvent, logInfo]);
 
     return (
         <Routes>
