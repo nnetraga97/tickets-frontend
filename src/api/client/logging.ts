@@ -11,13 +11,13 @@ export class RequestLogger {
     /**
      * Log the start of an API request
      */
-    static logRequestStart(ctx: RequestContext, hasBody: boolean, trace?: string): void {
+    static logRequestStart(ctx: RequestContext, body?: string, trace?: string): void {
         logApiDirect('api_request_start', {
             requestId: ctx.requestId,
             method: ctx.method,
             path: ctx.path,
             url: ctx.url,
-            hasBody,
+            body,
             metaname: ctx.metaname,
             trace
         }, 'api/client');

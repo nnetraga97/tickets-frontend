@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { getTicketById, Ticket } from "../api/tickets";
 import { fmtDate, fmtDateOnly } from "../utils/formatting";
@@ -13,6 +13,7 @@ import { internalStatus, INTERNAL_STATUSES } from "../constants";
 import { getInternalStatus, setInternalStatus } from "../store/internalStatus";
 import { extractContexts } from "../store/contextExtract";
 import { loadCtxFields, saveCtxFields, addCtxItem, removeCtxItem, setCtxSelected } from "../store/contextFields";
+import { getWorkarea, updateWorkarea, clearWorkarea } from "../api/workarea";
 
 export default function TicketDetail() {
     const { id } = useParams<{ id: string }>();
@@ -148,24 +149,89 @@ export default function TicketDetail() {
         window.open(DBEAVER_URL, "_blank", "noopener,noreferrer");
     };
 
-    const workKey = useMemo(() => (id ? `workarea:${id}` : ""), [id]);
-    const [work, setWork] = useState<string>("");
+    // Workarea management using API instead of localStorage
+    const { data: workareaData, isLoading: workareaLoading } = useQuery({
+        queryKey: ["workarea", id],
+        queryFn: () => getWorkarea(id!),
+        enabled: !!id,
+        staleTime: 30000, // 30 seconds
+    });
 
+    const [work, setWork] = useState<string>("");
+    const [workareaSaveTimeout, setWorkareaSaveTimeout] = useState<NodeJS.Timeout | null>(null);
+
+    // Update local state when data loads from server
     useEffect(() => {
-        if (workKey) {
-            try {
-                setWork(localStorage.getItem(workKey) || "");
-            } catch {
-                setWork("");
-            }
+        if (workareaData) {
+            setWork(workareaData.workarea || "");
+            console.log('workareaData', workareaData);
+            logDebug('TicketDetail_workarea_loaded', {
+                ticketId: id,
+                hasContent: !!workareaData.workarea,
+                length: workareaData.workarea?.length || 0,
+                lastModifiedBy: workareaData.last_modified_by
+            }, 'pages/TicketDetail.tsx');
         }
-    }, [workKey]);
+    }, [workareaData, id, logDebug,data]);
+
+    const updateWorkareaMutation = useMutation({
+        mutationFn: (workarea: string) => updateWorkarea({ incident_id: id!, workarea }),
+        onSuccess: (response) => {
+            logInfo('TicketDetail_workarea_saved', {
+                ticketId: id,
+                length: response.workarea?.length || 0,
+                lastModifiedBy: response.last_modified_by
+            }, 'pages/TicketDetail.tsx');
+            qc.invalidateQueries({ queryKey: ["workarea", id] });
+        },
+        onError: (error) => {
+            logError('TicketDetail_workarea_save_error', error, { ticketId: id });
+            push({
+                kind: "error",
+                title: "Failed to save workarea",
+                message: "Could not save workarea changes. Please try again.",
+            });
+        }
+    });
+
+    const clearWorkareaMutation = useMutation({
+        mutationFn: () => clearWorkarea(id!),
+        onSuccess: () => {
+            setWork("");
+            logInfo('TicketDetail_workarea_cleared', { ticketId: id }, 'pages/TicketDetail.tsx');
+            qc.invalidateQueries({ queryKey: ["workarea", id] });
+        },
+        onError: (error) => {
+            logError('TicketDetail_workarea_clear_error', error, { ticketId: id });
+            push({
+                kind: "error",
+                title: "Failed to clear workarea",
+                message: "Could not clear workarea. Please try again.",
+            });
+        }
+    });
 
     const saveWork = (val: string) => {
         setWork(val);
-        try {
-            localStorage.setItem(workKey, val);
-        } catch { }
+        
+        // Clear existing timeout
+        if (workareaSaveTimeout) {
+            clearTimeout(workareaSaveTimeout);
+        }
+
+        // Debounce save to API (wait 1 second after typing stops)
+        const timeout = setTimeout(() => {
+            updateWorkareaMutation.mutate(val);
+        }, 1000);
+        
+        setWorkareaSaveTimeout(timeout);
+    };
+
+    const clearWork = () => {
+        if (workareaSaveTimeout) {
+            clearTimeout(workareaSaveTimeout);
+        }
+        clearWorkareaMutation.mutate();
     };
 
     const [internal, setInternal] = useState<internalStatus | "">("");
@@ -307,7 +373,7 @@ export default function TicketDetail() {
             </div>
             <header className="flex items-center justify-between">
                 <h1 className="text-2xl font-semibold">
-                    {t.incident_id} <span className="ml-2 text-sm text-neutral-500">{t.status}</span>
+                    Incident {t.incident_id.replace(/^INC-/, '')} <span className="ml-2 text-sm text-neutral-500">{t.status}</span>
                 </h1>
                 <h1 className="text-2xl font-semibold">
                     <select value={internal} onChange={(e) => updateInternal((e.target.value || "") as internalStatus | "")}
@@ -442,23 +508,48 @@ export default function TicketDetail() {
                 </div>
             </section>
             <section className="rounded-2xl border border-black/5 bg-white p-4 dark:bg-neutral-900">
-                <h2 className="mb-2 text-lg font-semibold">WorkArea</h2>
+                <div className="mb-2 flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">WorkArea</h2>
+                    {updateWorkareaMutation.isPending && (
+                        <span className="text-xs text-blue-600 dark:text-blue-400">Saving...</span>
+                    )}
+                    {updateWorkareaMutation.isSuccess && !updateWorkareaMutation.isPending && (
+                        <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+                    )}
+                </div>
                 <p className="mb-2 text-xs text-neutral-500">
-                    Notes here are saved locally for this ticket (<span className="font-mono">{t.incident_id}</span>).
+                    Notes are saved to the database and tracked by user (<span className="font-mono">{t.incident_id}</span>).
+                    {workareaData?.last_modified_by && (
+                        <span className="ml-2">
+                            Last modified by <span className="font-semibold">{workareaData.last_modified_by}</span>
+                            {workareaData.last_modified_at && (
+                                <span className="ml-1">at {fmtDate(workareaData.last_modified_at)}</span>
+                            )}
+                        </span>
+                    )}
                 </p>
                 <textarea
                     value={work}
                     onChange={(e) => saveWork(e.target.value)}
-                    className="h-40 w-full resize-vertical rounded-xl border border-black/10 bg-white p-3 text-sm outline-none focus:border-black/30 dark:bg-neutral-800"
-                    placeholder="Write/paste anything..."
+                    disabled={workareaLoading}
+                    className="h-40 w-full resize-vertical rounded-xl border border-black/10 bg-white p-3 text-sm outline-none focus:border-black/30 disabled:opacity-50 dark:bg-neutral-800"
+                    placeholder={workareaLoading ? "Loading..." : "Write/paste anything..."}
                 />
                 <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
-                    <span>{work.length} chars</span>
+                    <div className="flex items-center gap-3">
+                        <span>{work.length} chars</span>
+                        {workareaData?.history_count !== undefined && workareaData.history_count > 0 && (
+                            <span className="text-neutral-400">
+                                {workareaData.history_count} {workareaData.history_count === 1 ? 'change' : 'changes'}
+                            </span>
+                        )}
+                    </div>
                     <button
-                        onClick={() => saveWork("")}
-                        className="rounded-lg px-2 py-1 hover:ng-neutral-100 dark:hover:bg-neutral-800"
+                        onClick={clearWork}
+                        disabled={clearWorkareaMutation.isPending || !work}
+                        className="rounded-lg px-2 py-1 hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed dark:hover:bg-neutral-800"
                     >
-                        Clear
+                        {clearWorkareaMutation.isPending ? 'Clearing...' : 'Clear'}
                     </button>
                 </div>
             </section>

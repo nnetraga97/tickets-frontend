@@ -36,7 +36,7 @@ export async function fetchJson<T = any>(path: string, options: FetchOptions = {
     const headers = buildHeaders(options.headers, ifNoneMatch);
 
     // Log request start
-    RequestLogger.logRequestStart(ctx, !!options.body, getTraceHeader());
+    RequestLogger.logRequestStart(ctx, options.body, getTraceHeader());
 
     let lastErr: any;
 
@@ -62,7 +62,7 @@ export async function fetchJson<T = any>(path: string, options: FetchOptions = {
             RequestLogger.logResponseReceived(
                 ctx,
                 resp.status,
-                resp.statusText,
+                JSON.stringify(resp),
                 !!resp.headers.get('etag'),
                 resp.headers.get('content-type')
             );

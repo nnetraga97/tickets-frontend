@@ -62,7 +62,7 @@ export default function TicketsAll() {
     const columns: Column<Row>[] = [
         {
             key: "incident_id", header: "Ticket ID", sortable: true, filter: "text",
-            render: (r) => <span className="font-mono">{r.incident_id}</span>
+            render: (r) => <span className="font-mono">{r.incident_id.replace(/^INC-/, '')}</span>
         },
         { key: "description", header: "Description", sortable: true, filter: "text" },
         {
