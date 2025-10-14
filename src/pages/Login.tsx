@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../store/auth";
 import { useLogger } from "../store/logger";
+import { login as apiLogin } from "../api/auth";
 
 export default function Login() {
     const { login } = useAuth();
@@ -9,14 +10,81 @@ export default function Login() {
     const location = useLocation() as any;
     const [u, setU] = useState('');
     const [p, setP] = useState('');
-    const { logEvent } = useLogger();
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const { logEvent, logInfo, logWarn, logError, startTimer } = useLogger();
 
-    const submit = (e: React.FormEvent) => {
+    // Log component lifecycle
+    useEffect(() => {
+        logInfo('Login_page_mounted', { 
+            redirectFrom: location.state?.from?.pathname 
+        }, 'pages/Login.tsx');
+        return () => {
+            logInfo('Login_page_unmounted', {}, 'pages/Login.tsx');
+        };
+    }, [logInfo, location.state?.from?.pathname]);
+
+    const submit = async (e: React.FormEvent) => {
         e.preventDefault();
-        logEvent("login_submit", { username: u, password: p })
-        login({ username: u, token: "mock-token" });
-        const dest = location.state?.from?.pathname || '/';
-        nav(dest, { replace: true });
+        const timer = startTimer('login');
+        setError('');
+        setLoading(true);
+        
+        // NEVER log passwords! Only log username for debugging
+        logInfo('Login_submit_attempt', { 
+            username: u,
+            hasPassword: !!p,
+            redirectTo: location.state?.from?.pathname || '/'
+        }, 'pages/Login.tsx');
+        
+        if (!u || !p) {
+            logWarn('Login_empty_credentials', { 
+                hasUsername: !!u,
+                hasPassword: !!p
+            }, 'pages/Login.tsx');
+            setError('Please enter username and password');
+            setLoading(false);
+            return;
+        }
+        
+        try {
+            logEvent("login_submit", { username: u })
+            
+            // Call real login API
+            const response = await apiLogin({ username: u, password: p });
+            
+            // Store credentials in auth context
+            login({ 
+                username: response.username, 
+                token: response.token,
+                email: response.email,
+                fullName: response.full_name,
+                role: response.role
+            });
+            
+            const dest = location.state?.from?.pathname || '/';
+            const duration = timer.end();
+            
+            logInfo('Login_success', { 
+                username: response.username,
+                role: response.role,
+                redirectTo: dest,
+                duration_ms: duration
+            }, 'pages/Login.tsx');
+            
+            nav(dest, { replace: true });
+        } catch (err) {
+            const duration = timer.end();
+            const errorMsg = (err as any)?.message || 'Login failed';
+            
+            logError('Login_failed', err, { 
+                username: u,
+                duration_ms: duration
+            });
+            
+            setError(errorMsg);
+            setLoading(false);
+        }
     };
 
     return (
@@ -46,13 +114,19 @@ export default function Login() {
                 <button
                     type="submit"
                     data-action="login_submit"
-                    className="w-full rounded-xl bg-black px-4 py-2 font-medium text-white transition hover:opacity-90"
+                    disabled={loading}
+                    className="w-full rounded-xl bg-black px-4 py-2 font-medium text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    Sign In
+                    {loading ? 'Signing In...' : 'Sign In'}
                 </button>
+                {error && (
+                    <div className="text-sm text-red-600 dark:text-red-400 text-center">
+                        {error}
+                    </div>
+                )}
             </form>
             <p className="mt-4 text-center text-xs text-neutral-500">
-                This is a mock login. Any username and password will work.
+                Test users: test/p, nikhil/n, admin/admin
             </p>
         </div>
     );

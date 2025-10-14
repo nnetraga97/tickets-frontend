@@ -35,7 +35,6 @@ function writeAll(arr: PerfRecord[]) {
 }
 
 function pushRec(r: PerfRecord) {
-    console.log("pushing performance metric");
     const arr = readAll();
     arr.push(r);
     writeAll(arr);
@@ -46,7 +45,6 @@ export function PerfProvider({ children }: { children: React.ReactNode }) {
     const initRef = useRef(false);
 
     useEffect(() => {
-        console.log("Performance UseEffect")
         if (initRef.current)
             return;
         initRef.current = true;

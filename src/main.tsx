@@ -14,6 +14,7 @@ import { AlertProvider } from './store/alert';
 import { registerServiceWorker } from "./sw/registerSW";
 import { AlertsLiveProvider } from './store/alertsLive';
 import { PerfProvider } from './store/perf';
+import { initializeTracing } from './telemetry';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +27,9 @@ const queryClient = new QueryClient({
 });
 
 registerServiceWorker();
+
+// Initialize OpenTelemetry tracing
+initializeTracing();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

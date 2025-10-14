@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import AppRouter from "./router";
 import ErrorBoundary from "./components/ErrorBoundary";
 import PageFrame from "./components/PageFrame";
+import { TraceInfo } from "./components/TraceInfo";
 
 export default function App() {
   const location = useLocation();
@@ -22,6 +23,7 @@ export default function App() {
             <AppRouter />
           </motion.div>
         </AnimatePresence>
+        <TraceInfo />
       </PageFrame>
     </ErrorBoundary>
   );

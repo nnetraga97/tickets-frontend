@@ -15,8 +15,18 @@ export default function NavBar() {
     const nav = useNavigate();
     const loc = useLocation();
     const { history, clearHistory } = useSession();
+    const { logInfo, logDebug } = useLogger();
 
-    useEffect(() => { setOpen(false); setHistOpen(false); }, [loc.pathname]);
+    // Log navigation changes
+    useEffect(() => {
+        logDebug('NavBar_location_changed', { 
+            pathname: loc.pathname,
+            search: loc.search
+        }, 'components/NavBar.tsx');
+        setOpen(false); 
+        setHistOpen(false);
+    }, [loc.pathname, loc.search, logDebug]);
+    
     useEffect(() => {
         function onDoc(e: MouseEvent) {
             if (menuRef.current && !menuRef.current.contains(e.target as Node))
@@ -31,6 +41,10 @@ export default function NavBar() {
 
     const submitSearch = (e: React.FormEvent) => {
         e.preventDefault();
+        logInfo('NavBar_search_submitted', { 
+            query: q,
+            queryLength: q.length
+        }, 'components/NavBar.tsx');
         nav("/", { replace: false });
     }
     return (

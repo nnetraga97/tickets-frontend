@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef } fr
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ServerAlert, connectAlertsSSE, listAlerts, markAlertRead as apiMarkRead, markAllAlertsRead as apiMarkAllRead } from "../api/alerts";
 import { useAlert } from "./alert";
+import { useAuth } from "./auth";
+import { useLogger } from "./logger";
 
 type AlertsCtx = {
     alerts: ServerAlert[];
@@ -20,22 +22,37 @@ const POLL_MS = Number(import.meta.env.VITE_ALERTS_POLL || 7000);
 export function AlertsLiveProvider({ children }: { children: React.ReactNode }) {
     const qc = useQueryClient();
     const { push } = useAlert();
+    const { user } = useAuth();
+    const { logInfo, logDebug } = useLogger();
     const sseRef = useRef<EventSource | null>(null);
 
     const { data: serverAlerts } = useQuery({
-        queryKey: ["alerts"],
-        queryFn: ({ signal }) => listAlerts(signal),
-        enabled: BACKEND_ON,
+        queryKey: ["alerts", user?.username],
+        queryFn: ({ signal }) => {
+            logInfo('AlertsLiveProvider_fetching', { 
+                username: user?.username,
+                role: user?.role,
+                backendOn: BACKEND_ON
+            }, 'store/alertsLive.tsx');
+            return listAlerts(signal);
+        },
+        enabled: BACKEND_ON && !!user,
         refetchInterval: BACKEND_ON && TRANSPORT !== "sse" ? (ctx) => (document.hidden ? POLL_MS * 4 : POLL_MS) : false,
         staleTime: 5_000,
         gcTime: 30 * 60_000,
     });
 
     useEffect(() => {
-        if (!BACKEND_ON || TRANSPORT !== "sse" || typeof window === "undefined")
+        if (!BACKEND_ON || TRANSPORT !== "sse" || typeof window === "undefined" || !user)
             return;
         if (sseRef.current)
             return;
+        
+        logInfo('AlertsLiveProvider_connecting_sse', { 
+            username: user.username,
+            role: user.role
+        }, 'store/alertsLive.tsx');
+        
         const es = connectAlertsSSE();
         if (!es)
             return;
@@ -55,18 +72,19 @@ export function AlertsLiveProvider({ children }: { children: React.ReactNode }) 
                         if (idx >= 0)
                             list.splice(idx, 1);
                     }
-                    else if (idx > 0) {
+                    else if (idx >= 0) {
                         list[idx] = alert;
                     }
                     else {
                         list.unshift(alert);
 
-                        if (!alert.read) {
+                        // Show toast for new unread alerts
+                        if (!alert.read && !alert.read_flag) {
                             push({
                                 title: alert.title || "New alert",
                                 message: alert.message,
-                                kind: (alert.kind as any) || "info",
-                                routeTo: alert.routeTo || undefined,
+                                kind: alert.kind || "info",
+                                routeTo: alert.routeTo || alert.route_to || undefined,
                                 toInbox: false,
                             });
                         }
@@ -89,34 +107,58 @@ export function AlertsLiveProvider({ children }: { children: React.ReactNode }) 
         }
 
         return () => {
+            logDebug('AlertsLiveProvider_disconnecting_sse', { 
+                username: user?.username
+            }, 'store/alertsLive.tsx');
             try {
                 es.close();
             } catch { }
             sseRef.current = null;
         };
-    }, [qc, push]);
+    }, [qc, push, user, logInfo, logDebug]);
 
-    const alerts = useMemo(() => (serverAlerts ?? []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0)), [serverAlerts]);
-    const unreadCount = useMemo(() => alerts.filter((a) => !a.read).length, [alerts]);
+    const alerts = useMemo(() => {
+        const filtered = (serverAlerts ?? []).slice().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+        logDebug('AlertsLiveProvider_alerts_loaded', { 
+            count: filtered.length,
+            unread: filtered.filter(a => !a.read && !a.read_flag).length,
+            username: user?.username
+        }, 'store/alertsLive.tsx');
+        return filtered;
+    }, [serverAlerts, user?.username, logDebug]);
+    
+    const unreadCount = useMemo(() => alerts.filter((a) => !a.read && !a.read_flag).length, [alerts]);
 
     const markRead = useCallback((id: string) => {
-        if (!BACKEND_ON)
+        if (!BACKEND_ON || !user)
             return;
 
-        qc.setQueryData<ServerAlert[]>(["alerts"], (prev) =>
-            (prev ?? []).map((a) => (a.id === id ? { ...a, read: true } : a)),
+        logDebug('AlertsLiveProvider_mark_read', { id, username: user.username }, 'store/alertsLive.tsx');
+        
+        qc.setQueryData<ServerAlert[]>(["alerts", user.username], (prev) =>
+            (prev ?? []).map((a) => (a.id === id ? { ...a, read: true, read_flag: true } : a)),
         );
         apiMarkRead(id, true).catch(() => {
-            qc.invalidateQueries({ queryKey: ["alerts"] });
+            qc.invalidateQueries({ queryKey: ["alerts", user.username] });
         });
-    }, [qc]);
+    }, [qc, user, logDebug]);
 
     const markAllRead = useCallback(() => {
-        if (!BACKEND_ON)
+        if (!BACKEND_ON || !user)
             return;
-        qc.setQueryData<ServerAlert[]>(["alerts"], (prev) => (prev ?? []).map((a) => ({ ...a, read: true })));
-        apiMarkAllRead().catch(() => { qc.invalidateQueries({ queryKey: ["alerts"] }); })
-    }, [qc]);
+        
+        logInfo('AlertsLiveProvider_mark_all_read', { 
+            username: user.username,
+            count: unreadCount
+        }, 'store/alertsLive.tsx');
+        
+        qc.setQueryData<ServerAlert[]>(["alerts", user.username], (prev) => 
+            (prev ?? []).map((a) => ({ ...a, read: true, read_flag: true }))
+        );
+        apiMarkAllRead().catch(() => { 
+            qc.invalidateQueries({ queryKey: ["alerts", user.username] }); 
+        })
+    }, [qc, user, unreadCount, logInfo]);
 
     const ctx: AlertsCtx = useMemo(
         () => ({ alerts, unreadCount, markRead, markAllRead, isServerEnabled: BACKEND_ON }),
