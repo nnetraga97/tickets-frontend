@@ -36,12 +36,37 @@ export default function Table<T extends Record<string, any>>({
 }) {
     const [sort, setSort] = useState<SortState<T>>(initialSort);
     const [filters, setFilters] = useState<Record<string, string>>({});
-    const { logEvent } = useLogger();
+    const { logEvent, logInfo, logDebug, startTimer } = useLogger();
+
+    // Log table initialization
+    useEffect(() => {
+        logInfo('Table_mounted', { 
+            rowCount: rows.length,
+            columnCount: columns.length,
+            enableSorting,
+            enableFilters,
+            hasInitialSort: !!initialSort
+        }, 'components/Table.tsx');
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Log when data changes significantly
+    useEffect(() => {
+        logDebug('Table_rows_changed', { 
+            rowCount: rows.length
+        }, 'components/Table.tsx');
+    }, [rows.length, logDebug]);
     const setFilter = (key: string, value: string) =>
         setFilters((f) => {
             const v = value ?? "";
             const next = { ...f, [key]: v };
             if (!v) delete next[key];
+            
+            logInfo("Table_filter_applied", { 
+                key, 
+                value: v,
+                activeFilterCount: Object.keys(next).length
+            }, 'components/Table.tsx');
+            
             logEvent("table_filter", { key, value: v });
             return next;
         });
@@ -51,10 +76,13 @@ export default function Table<T extends Record<string, any>>({
         return v;
     }
     const filtered = useMemo(() => {
-        if (!enableFilters || Object.keys(filters).length === 0)
+        const timer = startTimer('table_filter');
+        
+        if (!enableFilters || Object.keys(filters).length === 0) {
             return rows;
+        }
 
-        return rows.filter((r) =>
+        const result = rows.filter((r) =>
             columns.every((c) => {
                 const k = String(c.key);
                 const q = filters[k];
@@ -73,18 +101,32 @@ export default function Table<T extends Record<string, any>>({
                 return hay.includes(q.toLowerCase());
             }),
         );
-    }, [rows, columns, filters, enableFilters]);
+        
+        const duration = timer.end();
+        logDebug('Table_filter_computed', { 
+            inputRows: rows.length,
+            outputRows: result.length,
+            filterCount: Object.keys(filters).length,
+            duration_ms: duration
+        }, 'components/Table.tsx');
+        
+        return result;
+    }, [rows, columns, filters, enableFilters, startTimer, logDebug]);
 
     const sorted = useMemo(() => {
-        if (!enableSorting || !sort)
+        const timer = startTimer('table_sort');
+        
+        if (!enableSorting || !sort) {
             return filtered;
+        }
 
         const col = columns.find((c) => String(c.key) === String(sort.key));
-        if (!col || col.sortable === false)
+        if (!col || col.sortable === false) {
             return filtered;
+        }
 
         const dir = sort.dir === "asc" ? 1 : -1;
-        return [...filtered]
+        const result = [...filtered]
             .map((v, i) => ({ v, i }))
             .sort((a, b) => {
                 const va = getVal(col, a.v);
@@ -105,7 +147,17 @@ export default function Table<T extends Record<string, any>>({
                 return a.i - b.i;
             })
             .map((x) => x.v);
-    }, [filtered, columns, sort, enableSorting]);
+        
+        const duration = timer.end();
+        logDebug('Table_sort_computed', { 
+            rowCount: filtered.length,
+            sortKey: String(sort.key),
+            sortDir: sort.dir,
+            duration_ms: duration
+        }, 'components/Table.tsx');
+        
+        return result;
+    }, [filtered, columns, sort, enableSorting, startTimer, logDebug]);
 
     useEffect(() => {
         onViewRowsChange?.(sorted);
@@ -116,13 +168,31 @@ export default function Table<T extends Record<string, any>>({
         setSort((s) => {
             const next = !s || s.key !== key ? { key, dir: "asc" as SortDir } : s.dir === "asc" ? { key, dir: "desc" as SortDir } : null;
             const payload = next ? { key: String(key), dir: next.dir } : { key: String(key), dir: "off" };
+            
+            logInfo("Table_sort_toggled", { 
+                sortKey: String(key),
+                newDir: next?.dir || 'off',
+                previousDir: s?.key === key ? s.dir : 'none'
+            }, 'components/Table.tsx');
+            
             logEvent("table_sort", { payload });
             return next;
         });
     };
 
-    const clearFilters = () => setFilters({});
-    const clearSort = () => setSort(null);
+    const clearFilters = () => {
+        logInfo("Table_filters_cleared", { 
+            previousFilterCount: Object.keys(filters).length
+        }, 'components/Table.tsx');
+        setFilters({});
+    };
+    
+    const clearSort = () => {
+        logInfo("Table_sort_cleared", { 
+            previousSort: sort ? `${String(sort.key)} ${sort.dir}` : 'none'
+        }, 'components/Table.tsx');
+        setSort(null);
+    };
 
     const handleClick = (row: T) => {
         onRowClick?.(row);

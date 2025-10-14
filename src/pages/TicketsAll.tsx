@@ -2,19 +2,42 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Table, { Column } from "../components/Table";
 import { getAllTickets, Ticket } from "../api/tickets";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmtDate } from "../utils/formatting";
 import { toCSV, downloadBlob } from "../utils/csv";
 import { INTERNAL_STATUSES, internalStatus } from "../constants";
 import { getInternalStatus } from "../store/internalStatus";
+import { useLogger } from "../store/logger";
 
 type Row = Ticket & { internal_status?: internalStatus | "" };
 
 export default function TicketsAll() {
     const nav = useNavigate();
+    const { logInfo, logDebug, logError, startTimer } = useLogger();
     const { data = [], isLoading } = useQuery({ queryKey: ["tickets", "all"], queryFn: ({ signal }) => getAllTickets(signal) });
     const [viewRows, setViewRows] = useState<Row[]>([]);
     const [ctx, setCtx] = useState<{ x: number; y: number; row: Row } | null>(null);
+
+    // Log component lifecycle
+    useEffect(() => {
+        logInfo('TicketsAll_mounted', {}, 'pages/TicketsAll.tsx');
+        return () => {
+            logInfo('TicketsAll_unmounted', {}, 'pages/TicketsAll.tsx');
+        };
+    }, [logInfo]);
+
+    // Log data loading state changes
+    useEffect(() => {
+        if (isLoading) {
+            logDebug('TicketsAll_loading', {}, 'pages/TicketsAll.tsx');
+        } else {
+            logInfo('TicketsAll_data_loaded', { 
+                ticketCount: data.length,
+                uniqueCategories: new Set(data.map(t => t.category)).size,
+                uniqueStatuses: new Set(data.map(t => t.status)).size
+            }, 'pages/TicketsAll.tsx');
+        }
+    }, [isLoading, data.length, logDebug, logInfo, data]);
 
     // augment with local internal status
     const rows: Row[] = useMemo(
@@ -31,10 +54,15 @@ export default function TicketsAll() {
         return () => window.removeEventListener("internal-status-changed", onEvt as any);
     }, []);
 
+    // Memoize the callback to prevent infinite re-renders
+    const handleViewRowsChange = useCallback((r: Row[]) => {
+        setViewRows(r);
+    }, []);
+
     const columns: Column<Row>[] = [
         {
             key: "incident_id", header: "Ticket ID", sortable: true, filter: "text",
-            render: (r) => <span className="font-mono">{r.incident_id}</span>
+            render: (r) => <span className="font-mono">{r.incident_id.replace(/^INC-/, '')}</span>
         },
         { key: "description", header: "Description", sortable: true, filter: "text" },
         {
@@ -58,12 +86,31 @@ export default function TicketsAll() {
         },
     ];
 
-    const onDownloadCSV = () => {
-        const headers = columns.map((c) => ({ key: c.key as keyof Row, header: c.header }));
-        const csv = toCSV(viewRows, headers);
-        const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
-        downloadBlob(csv, `home-tickets-view-${stamp}.csv`);
-    };
+    const onDownloadCSV = useCallback(() => {
+        const timer = startTimer('csv_download');
+        logInfo('TicketsAll_csv_download_started', { 
+            rowCount: viewRows.length,
+            columnCount: columns.length 
+        }, 'pages/TicketsAll.tsx');
+        
+        try {
+            const headers = columns.map((c) => ({ key: c.key as keyof Row, header: c.header }));
+            const csv = toCSV(viewRows, headers);
+            const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+            const filename = `home-tickets-view-${stamp}.csv`;
+            downloadBlob(csv, filename);
+            
+            const duration = timer.end();
+            logInfo('TicketsAll_csv_download_success', { 
+                filename,
+                rowCount: viewRows.length,
+                csvSize: csv.length,
+                duration_ms: duration
+            }, 'pages/TicketsAll.tsx');
+        } catch (err) {
+            logError('TicketsAll_csv_download_error', err, { rowCount: viewRows.length });
+        }
+    }, [viewRows, columns, startTimer, logInfo, logError]);
 
     return (
         <div className="space-y-3">
@@ -82,9 +129,23 @@ export default function TicketsAll() {
                     rows={rows}
                     columns={columns}
                     getRowId={(r) => r.incident_id}
-                    onRowClick={(r) => nav(`/tickets/${encodeURIComponent(r.incident_id)}`)}
-                    onRowContextMenu={(row, pos) => setCtx({ x: pos.x, y: pos.y, row })}
-                    onViewRowsChange={(r) => setViewRows(r)}
+                    onRowClick={(r) => {
+                        logInfo('TicketsAll_ticket_clicked', { 
+                            ticketId: r.incident_id,
+                            status: r.status,
+                            category: r.category
+                        }, 'pages/TicketsAll.tsx');
+                        nav(`/tickets/${encodeURIComponent(r.incident_id)}`);
+                    }}
+                    onRowContextMenu={(row, pos) => {
+                        logDebug('TicketsAll_context_menu_opened', { 
+                            ticketId: row.incident_id,
+                            x: pos.x,
+                            y: pos.y
+                        }, 'pages/TicketsAll.tsx');
+                        setCtx({ x: pos.x, y: pos.y, row });
+                    }}
+                    onViewRowsChange={handleViewRowsChange}
                     enableFilters
                     enableSorting
                 />
@@ -98,6 +159,9 @@ export default function TicketsAll() {
                         <button
                             className="block w-full rounded-md px-3 py-1.5 text-left text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700/50"
                             onClick={() => {
+                                logInfo('TicketsAll_open_in_new_tab', { 
+                                    ticketId: ctx.row.incident_id 
+                                }, 'pages/TicketsAll.tsx');
                                 window.open(`/tickets/${encodeURIComponent(ctx.row.incident_id)}`, "_blank", "noopener,noreferrer");
                                 setCtx(null);
                             }}
