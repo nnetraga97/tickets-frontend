@@ -16,6 +16,7 @@ import AttachmentsSection from "../components/AttachmentsSection";
 import WorkareaSection from "../components/WorkareaSection";
 import TicketInfoGrid from "../components/TicketInfoGrid";
 import TicketSection from "../components/TicketSection";
+import SimilarTickets from "../components/SimilarTickets";
 
 export default function TicketDetail() {
     const { id } = useParams<{ id: string }>();
@@ -204,6 +205,8 @@ export default function TicketDetail() {
             <AttachmentsSection incidentId={t.incident_id} />
             
             <WorkareaSection incidentId={t.incident_id} />
+            
+            <SimilarTickets incidentId={t.incident_id} limit={5} />
         </div>
     );
 }

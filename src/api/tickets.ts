@@ -118,3 +118,42 @@ export async function getTicketsFiltered(params: Record<string, string>, signal?
         throw err;
     }
 }
+
+export type SimilarTicket = {
+    incident_id: string;
+    summary: string;
+    description: string;
+    category: string;
+    subcategory: string;
+    status: string;
+    priority: string;
+    created_date_time: string;
+    similarity_score: number;
+};
+
+export type SimilarTicketsResponse = {
+    incident_id: string;
+    similar_tickets: SimilarTicket[];
+    count: number;
+};
+
+export async function getSimilarTickets(id: string, limit: number = 5, signal?: AbortSignal): Promise<SimilarTicketsResponse> {
+    logApiDirect('getSimilarTickets_start', { id, limit }, 'api/tickets.ts');
+    
+    try {
+        const response = await fetchJson<SimilarTicketsResponse>(
+            `/api/tickets/${encodeURIComponent(id)}/similar?limit=${limit}`, 
+            { signal, metaname: 'getSimilarTickets' }
+        );
+        
+        logApiDirect('getSimilarTickets_success', { 
+            id, 
+            count: response.similar_tickets?.length || 0 
+        }, 'api/tickets.ts');
+        
+        return response;
+    } catch (err) {
+        logErrorDirect('getSimilarTickets_error', err, { id, limit });
+        throw err;
+    }
+}
